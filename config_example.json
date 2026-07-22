@@ -1,0 +1,16 @@
+{
+  "join_type": "left",
+  "match_mode": "exact",
+  "files": [
+    {
+      "path": "file1.xlsx",
+      "key": "고객ID",
+      "columns": ["고객ID", "이름", "가입일"]
+    },
+    {
+      "path": "file2.xlsx",
+      "key": "고객번호",
+      "columns": ["고객번호", "매출액", "최근구매일"]
+    }
+  ]
+}

@@ -60,6 +60,12 @@
   th, td{ border:1px solid var(--border); padding:4px 8px; }
   th{ background:var(--card); }
   .hint{ font-size:0.78rem; color:var(--muted); }
+  .raw-preview{ max-height:180px; overflow:auto; border:1px solid var(--border); border-radius:6px; margin-top:6px; }
+  .raw-preview table{ margin-top:0; width:100%; }
+  .raw-preview td, .raw-preview th{ white-space:nowrap; cursor:pointer; }
+  .raw-preview tr.header-row td{ background:var(--accent); color:#fff; }
+  .raw-preview tr:hover td{ outline:1px solid var(--accent); }
+  .rownum{ color:var(--muted); font-size:0.75rem; user-select:none; }
 </style>
 </head>
 <body>
@@ -146,6 +152,7 @@ function handleFiles(fileListRaw){
         workbook,
         sheetNames: workbook.SheetNames,
         sheet: workbook.SheetNames[0],
+        headerRow: 1,
         key: null,
         columns: null,
       };
@@ -160,11 +167,32 @@ function handleFiles(fileListRaw){
 
 function loadSheet(entry, sheetName){
   const ws = entry.workbook.Sheets[sheetName];
-  const rows = XLSX.utils.sheet_to_json(ws, { defval: '', raw: false });
-  const headers = rows.length ? Object.keys(rows[0]) : (XLSX.utils.sheet_to_json(ws, { header:1 })[0] || []);
   entry.sheet = sheetName;
-  entry.rows = rows;
+  entry.rawRows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: false });
+  if (entry.headerRow > entry.rawRows.length) entry.headerRow = 1;
+  applyHeaderRow(entry);
+}
+
+function applyHeaderRow(entry){
+  const idx = entry.headerRow - 1;
+  const headerLine = entry.rawRows[idx] || [];
+  const seen = new Map();
+  const headers = headerLine.map((h, i) => {
+    let name = (h === undefined || h === null || String(h).trim() === '') ? `열${i+1}` : String(h).trim();
+    const count = seen.get(name) || 0;
+    seen.set(name, count + 1);
+    return count === 0 ? name : `${name}_${count+1}`;
+  });
+  const dataLines = entry.rawRows.slice(idx + 1);
+  const rows = dataLines
+    .filter(line => line.some(v => String(v).trim() !== ''))
+    .map(line => {
+      const obj = {};
+      headers.forEach((h, i) => { obj[h] = line[i] !== undefined ? line[i] : ''; });
+      return obj;
+    });
   entry.headers = headers;
+  entry.rows = rows;
   if (!entry.key || !headers.includes(entry.key)) entry.key = headers[0] || null;
   entry.columns = headers.slice();
 }
@@ -208,6 +236,23 @@ function renderFileList(){
       row.appendChild(sheetField);
     }
 
+    const headerRowField = document.createElement('div');
+    headerRowField.className = 'field';
+    headerRowField.innerHTML = `<label>헤더 행 번호</label>`;
+    const headerRowInput = document.createElement('input');
+    headerRowInput.type = 'text';
+    headerRowInput.style.width = '70px';
+    headerRowInput.value = entry.headerRow;
+    headerRowInput.onchange = () => {
+      const n = parseInt(headerRowInput.value, 10);
+      if (!n || n < 1 || n > entry.rawRows.length) { headerRowInput.value = entry.headerRow; return; }
+      entry.headerRow = n;
+      applyHeaderRow(entry);
+      renderFileList();
+    };
+    headerRowField.appendChild(headerRowInput);
+    row.appendChild(headerRowField);
+
     const keyField = document.createElement('div');
     keyField.className = 'field';
     keyField.innerHTML = `<label>매칭 키 컬럼</label>`;
@@ -228,6 +273,36 @@ function renderFileList(){
     row.appendChild(rowsField);
 
     card.appendChild(row);
+
+    const previewLabel = document.createElement('label');
+    previewLabel.textContent = '원본 미리보기 (행을 클릭하면 헤더 행으로 지정됨)';
+    card.appendChild(previewLabel);
+
+    const previewBox = document.createElement('div');
+    previewBox.className = 'raw-preview';
+    const previewTable = document.createElement('table');
+    const previewLimit = Math.min(entry.rawRows.length, 15);
+    for (let r = 0; r < previewLimit; r++) {
+      const tr = document.createElement('tr');
+      if (r === entry.headerRow - 1) tr.classList.add('header-row');
+      tr.onclick = () => {
+        entry.headerRow = r + 1;
+        applyHeaderRow(entry);
+        renderFileList();
+      };
+      const numTd = document.createElement('td');
+      numTd.className = 'rownum';
+      numTd.textContent = r + 1;
+      tr.appendChild(numTd);
+      (entry.rawRows[r] || []).forEach(v => {
+        const td = document.createElement('td');
+        td.textContent = v;
+        tr.appendChild(td);
+      });
+      previewTable.appendChild(tr);
+    }
+    previewBox.appendChild(previewTable);
+    card.appendChild(previewBox);
 
     const colsLabel = document.createElement('label');
     colsLabel.textContent = '결과에 남길 컬럼';

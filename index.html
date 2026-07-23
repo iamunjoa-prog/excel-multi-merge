@@ -352,7 +352,8 @@ function mergeAll(files, joinType){
 
   for (let i = 1; i < files.length; i++) {
     const f = files[i];
-    const renamed = f.columns.map(c => usedNames.has(c) ? `${c}_${i+1}` : c);
+    // 이미 결과에 있는 컬럼명은 중복 추가하지 않고 먼저 나온 파일 값을 그대로 유지합니다.
+    const newCols = f.columns.filter(c => !usedNames.has(c));
     const index = new Map();
     f.rows.forEach(r => {
       const k = trimKey(r[f.key]);
@@ -369,7 +370,7 @@ function mergeAll(files, joinType){
       if (match) matchedKeys.add(k);
       if (joinType === 'inner' && !match) continue;
       const rightVals = {};
-      f.columns.forEach((c, idx) => { rightVals[renamed[idx]] = match ? (match[c] !== undefined ? match[c] : '') : ''; });
+      newCols.forEach(c => { rightVals[c] = match ? (match[c] !== undefined ? match[c] : '') : ''; });
       newRows.push({ ...resultRows[j], ...rightVals });
       newKeys.push(k);
     }
@@ -380,7 +381,10 @@ function mergeAll(files, joinType){
       index.forEach((row, k) => {
         if (!matchedKeys.has(k)) {
           const rightVals = {};
-          f.columns.forEach((c, idx) => { rightVals[renamed[idx]] = row[c] !== undefined ? row[c] : ''; });
+          newCols.forEach(c => { rightVals[c] = row[c] !== undefined ? row[c] : ''; });
+          // 겹치는 컬럼(예: 두 파일 모두 있는 기준일자/타이틀)은 오른쪽 파일에만 있던 행이라도
+          // 오른쪽 값으로 채워서 정보가 비지 않게 합니다.
+          f.columns.forEach(c => { if (usedNames.has(c)) rightVals[c] = row[c] !== undefined ? row[c] : ''; });
           newRows.push({ ...blankLeft, ...rightVals });
           newKeys.push(k);
         }
@@ -389,7 +393,7 @@ function mergeAll(files, joinType){
 
     resultRows = newRows;
     resultKeys = newKeys;
-    renamed.forEach(c => usedNames.add(c));
+    newCols.forEach(c => usedNames.add(c));
   }
 
   return resultRows;
@@ -415,13 +419,30 @@ document.getElementById('mergeBtn').addEventListener('click', () => {
   }
 
   log(`완료: ${merged.length}행, ${merged.length ? Object.keys(merged[0]).length : 0}열`);
-  renderPreview(merged);
-  downloadResult(merged, outputFormat, outputName);
+  renderPreview(merged, outputFormat, outputName);
+
+  try {
+    downloadResult(merged, outputFormat, outputName);
+  } catch (err) {
+    log(`병합은 완료됐지만 자동 다운로드에 실패했습니다: ${err.message}\n아래 "결과 파일 다운로드" 버튼을 눌러주세요.`);
+  }
 });
 
-function renderPreview(rows){
+function renderPreview(rows, format, name){
   resultEl.innerHTML = '';
   if (!rows.length) return;
+
+  const dlBtn = document.createElement('button');
+  dlBtn.textContent = '결과 파일 다운로드';
+  dlBtn.onclick = () => {
+    try {
+      downloadResult(rows, format, name);
+    } catch (err) {
+      log(`다운로드 실패: ${err.message}`);
+    }
+  };
+  resultEl.appendChild(dlBtn);
+
   const cols = Object.keys(rows[0]);
   const table = document.createElement('table');
   const thead = document.createElement('tr');
@@ -455,9 +476,14 @@ function downloadResult(rows, format, name){
 function triggerDownload(blob, filename){
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
+  a.style.display = 'none';
   a.href = url; a.download = filename;
-  document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => {
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, 1000);
 }
 </script>
 </body>
